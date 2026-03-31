@@ -238,6 +238,9 @@ private struct AVDEditorFormView: View {
 
     private let gpuModes = ["auto", "host", "swiftshader_indirect"]
     private let networkModes = ["none", "gprs", "edge", "umts", "lte", "full"]
+    private var deviceOptions: [DeviceDefinition] {
+        [DeviceDefinition.custom] + availableDevices
+    }
 
     var body: some View {
         ScrollView {
@@ -253,9 +256,16 @@ private struct AVDEditorFormView: View {
                 GroupBox("Identity") {
                     VStack(alignment: .leading, spacing: 12) {
                         LabeledContent("AVD Name") {
-                            TextField("Pixel_9_Pro", text: $draft.name)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 280)
+                            VStack(alignment: .leading, spacing: 4) {
+                                TextField("Pixel_9_Pro", text: $draft.name)
+                                    .textFieldStyle(.roundedBorder)
+
+                                Text(draft.nameHelperText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(width: 280, alignment: .leading)
                         }
 
                         LabeledContent("Display Name") {
@@ -271,7 +281,7 @@ private struct AVDEditorFormView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         LabeledContent("Device Profile") {
                             Picker("Device Profile", selection: $draft.deviceID) {
-                                ForEach(availableDevices) { device in
+                                ForEach(deviceOptions) { device in
                                     Text(device.displayName).tag(device.id)
                                 }
                             }
@@ -292,6 +302,50 @@ private struct AVDEditorFormView: View {
                         }
                     }
                     .padding(.top, 6)
+                }
+
+                if draft.usesCustomDeviceProfile {
+                    GroupBox("Custom Device Profile") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            LabeledContent("Profile Name") {
+                                TextField("Custom Phone", text: $draft.customDeviceName)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 280)
+                            }
+
+                            LabeledContent("Manufacturer") {
+                                TextField("EmuFleet", text: $draft.customManufacturer)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 280)
+                            }
+
+                            LabeledContent("Resolution") {
+                                HStack(spacing: 8) {
+                                    TextField("1080", text: $draft.customScreenWidth)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 76)
+                                    Text("×")
+                                        .foregroundStyle(.secondary)
+                                    TextField("2400", text: $draft.customScreenHeight)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 76)
+                                }
+                            }
+
+                            LabeledContent("Density") {
+                                TextField("420", text: $draft.customScreenDensity)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 90)
+                            }
+
+                            Text(draft.customProfileHelperText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 6)
+                        .disabled(draft.immutableFieldsLocked)
+                    }
                 }
 
                 GroupBox("Resources") {

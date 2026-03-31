@@ -47,16 +47,24 @@ actor AndroidAVDService {
         guard !trimmedName.isEmpty else {
             throw AndroidAVDError.invalidDraft("An AVD name is required.")
         }
-        guard !draft.deviceID.isEmpty else {
+        guard draft.usesCustomDeviceProfile || !draft.deviceID.isEmpty else {
             throw AndroidAVDError.invalidDraft("Choose a device profile.")
         }
         guard !draft.systemImagePackage.isEmpty else {
             throw AndroidAVDError.invalidDraft("Choose an installed system image.")
         }
+        if draft.usesCustomDeviceProfile {
+            _ = try positiveIntegerString(from: draft.customScreenWidth, fieldName: "Custom width")
+            _ = try positiveIntegerString(from: draft.customScreenHeight, fieldName: "Custom height")
+            _ = try positiveIntegerString(from: draft.customScreenDensity, fieldName: "Custom density")
+        }
 
         switch draft.mode {
         case .create, .duplicate:
-            var arguments = ["create", "avd", "-n", trimmedName, "-k", draft.systemImagePackage, "-d", draft.deviceID, "-f"]
+            var arguments = ["create", "avd", "-n", trimmedName, "-k", draft.systemImagePackage, "-f"]
+            if !draft.usesCustomDeviceProfile {
+                arguments.append(contentsOf: ["-d", draft.deviceID])
+            }
             if !draft.sdCardSize.isEmpty {
                 arguments.append(contentsOf: ["-c", draft.sdCardSize])
             }
@@ -167,6 +175,20 @@ actor AndroidAVDService {
         configuration["sdcard.size"] = draft.sdCardSize
         configuration["showDeviceFrame"] = draft.showDeviceFrame ? "yes" : "no"
         configuration["vm.heapSize"] = draft.vmHeapSizeMB
+
+        if draft.usesCustomDeviceProfile {
+            let width = try positiveIntegerString(from: draft.customScreenWidth, fieldName: "Custom width")
+            let height = try positiveIntegerString(from: draft.customScreenHeight, fieldName: "Custom height")
+            let density = try positiveIntegerString(from: draft.customScreenDensity, fieldName: "Custom density")
+
+            configuration["hw.device.name"] = draft.resolvedCustomDeviceName
+            configuration["hw.device.manufacturer"] = draft.resolvedCustomManufacturer
+            configuration["hw.lcd.width"] = width
+            configuration["hw.lcd.height"] = height
+            configuration["hw.lcd.density"] = density
+            configuration["skin.dynamic"] = "yes"
+            configuration["skin.name"] = "\(width)x\(height)"
+        }
 
         try writeKeyValueFile(configuration, to: configURL)
     }
@@ -510,6 +532,26 @@ actor AndroidAVDService {
         return String(line[line.index(after: firstQuote)..<lastQuote])
     }
 
+    private func positiveIntegerString(from rawValue: String, fieldName: String) throws -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(trimmed), value > 0 else {
+            throw AndroidAVDError.invalidDraft("\(fieldName) must be a positive number.")
+        }
+        return String(value)
+    }
+
+    private func sanitizedCommandMessage(stderr: String, stdout: String) -> String {
+        let sanitizedStreams = [stderr, stdout].map { stream in
+            stream
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && $0.lowercased() != "null" }
+                .joined(separator: "\n")
+        }
+
+        return sanitizedStreams.first(where: { !$0.isEmpty }) ?? "Command failed."
+    }
+
     private func runCommand(
         executable: URL,
         arguments: [String],
@@ -542,8 +584,7 @@ actor AndroidAVDService {
         let result = CommandResult(stdout: stdout, stderr: stderr, terminationStatus: process.terminationStatus)
 
         if process.terminationStatus != 0 && !allowFailure {
-            let message = [stderr.trimmingCharacters(in: .whitespacesAndNewlines), stdout.trimmingCharacters(in: .whitespacesAndNewlines)]
-                .first(where: { !$0.isEmpty }) ?? "Command failed."
+            let message = sanitizedCommandMessage(stderr: stderr, stdout: stdout)
             throw AndroidAVDError.commandFailed(message)
         }
 

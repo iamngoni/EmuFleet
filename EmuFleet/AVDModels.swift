@@ -1,5 +1,9 @@
 import Foundation
 
+enum AVDConstants {
+    nonisolated static let customDeviceID = "__custom_profile__"
+}
+
 struct AndroidToolchain: Equatable {
     var sdkRoot: URL?
     var avdManagerURL: URL?
@@ -76,7 +80,21 @@ struct DeviceDefinition: Identifiable, Hashable {
     let oem: String
     let tag: String?
 
+    static let custom = DeviceDefinition(
+        id: AVDConstants.customDeviceID,
+        name: "Custom Profile",
+        oem: "EmuFleet",
+        tag: nil
+    )
+
+    var isCustom: Bool {
+        id == AVDConstants.customDeviceID
+    }
+
     var displayName: String {
+        if isCustom {
+            return name
+        }
         if oem.isEmpty {
             return name
         }
@@ -208,11 +226,18 @@ enum AVDEditorMode: Equatable {
 }
 
 struct AVDEditorDraft: Equatable {
+    nonisolated private static let allowedNameCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+
     var mode: AVDEditorMode
     var name: String
     var displayName: String
     var deviceID: String
     var systemImagePackage: String
+    var customDeviceName: String
+    var customManufacturer: String
+    var customScreenWidth: String
+    var customScreenHeight: String
+    var customScreenDensity: String
     var sdCardSize: String
     var dataPartitionSize: String
     var ramSizeMB: String
@@ -230,6 +255,51 @@ struct AVDEditorDraft: Equatable {
 
     var immutableFieldsLocked: Bool {
         !mode.allowsImmutableChanges
+    }
+
+    nonisolated var usesCustomDeviceProfile: Bool {
+        deviceID == AVDConstants.customDeviceID
+    }
+
+    nonisolated var normalizedNameSuggestion: String {
+        let source = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? displayName : name
+        return Self.normalizedName(from: source)
+    }
+
+    nonisolated var nameHelperText: String {
+        if normalizedNameSuggestion.isEmpty {
+            return "Internal identifier. Use letters, numbers, '.', '_' or '-'."
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty && trimmedName == normalizedNameSuggestion {
+            return "Internal identifier used by the emulator. The display name can include spaces."
+        }
+
+        return "Will save as \(normalizedNameSuggestion). Only letters, numbers, '.', '_' and '-' are allowed."
+    }
+
+    nonisolated var customProfileHelperText: String {
+        "Creates the AVD without a predefined template and writes this hardware profile directly into config.ini."
+    }
+
+    nonisolated var resolvedCustomDeviceName: String {
+        let trimmed = customDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+
+        let display = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !display.isEmpty {
+            return display
+        }
+
+        return normalizedNameSuggestion.isEmpty ? "Custom Device" : Self.humanizedName(from: normalizedNameSuggestion)
+    }
+
+    nonisolated var resolvedCustomManufacturer: String {
+        let trimmed = customManufacturer.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "EmuFleet" : trimmed
     }
 
     var title: String {
@@ -250,6 +320,11 @@ struct AVDEditorDraft: Equatable {
             displayName: "",
             deviceID: deviceID ?? "",
             systemImagePackage: systemImagePackage ?? "",
+            customDeviceName: "Custom Phone",
+            customManufacturer: "EmuFleet",
+            customScreenWidth: "1080",
+            customScreenHeight: "2400",
+            customScreenDensity: "420",
             sdCardSize: "512M",
             dataPartitionSize: "6G",
             ramSizeMB: "2048",
@@ -270,6 +345,11 @@ struct AVDEditorDraft: Equatable {
             displayName: avd.displayName,
             deviceID: avd.deviceName,
             systemImagePackage: avd.systemImagePackage,
+            customDeviceName: avd.config["hw.device.name"] ?? avd.displayName,
+            customManufacturer: avd.config["hw.device.manufacturer"] ?? avd.manufacturer,
+            customScreenWidth: avd.config["hw.lcd.width"] ?? "1080",
+            customScreenHeight: avd.config["hw.lcd.height"] ?? "2400",
+            customScreenDensity: avd.config["hw.lcd.density"] ?? "420",
             sdCardSize: avd.sdCardSize,
             dataPartitionSize: avd.dataPartitionSize,
             ramSizeMB: avd.ramSizeMB,
@@ -281,6 +361,40 @@ struct AVDEditorDraft: Equatable {
             originalDeviceID: avd.deviceName,
             originalSystemImagePackage: avd.systemImagePackage
         )
+    }
+
+    nonisolated static func normalizedName(from rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        var scalars: [UnicodeScalar] = []
+        var previousWasSeparator = false
+
+        for scalar in trimmed.unicodeScalars {
+            if allowedNameCharacters.contains(scalar) {
+                scalars.append(scalar)
+                previousWasSeparator = scalar == "_" || scalar == "-"
+            } else if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                if !scalars.isEmpty && !previousWasSeparator {
+                    scalars.append("_")
+                    previousWasSeparator = true
+                }
+            }
+        }
+
+        let normalized = String(String.UnicodeScalarView(scalars))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "._-"))
+
+        return normalized
+    }
+
+    nonisolated private static func humanizedName(from value: String) -> String {
+        value
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

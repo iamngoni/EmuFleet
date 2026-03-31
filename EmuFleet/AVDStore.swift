@@ -172,7 +172,7 @@ final class AVDStore: ObservableObject {
             }
 
             if let selectedAVD {
-                draft = .from(avd: selectedAVD, mode: .edit(originalName: selectedAVD.name))
+                draft = normalizeDeviceProfile(in: .from(avd: selectedAVD, mode: .edit(originalName: selectedAVD.name)))
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -192,7 +192,7 @@ final class AVDStore: ObservableObject {
         var nextDraft = AVDEditorDraft.from(avd: avd, mode: .duplicate(sourceName: avd.name))
         nextDraft.name = "\(avd.name)_copy"
         nextDraft.displayName = "\(avd.displayName) Copy"
-        draft = nextDraft
+        draft = normalizeDeviceProfile(in: nextDraft)
     }
 
     func selectAVD(named name: String?) {
@@ -205,22 +205,35 @@ final class AVDStore: ObservableObject {
             }
             return
         }
-        draft = .from(avd: avd, mode: .edit(originalName: avd.name))
+        draft = normalizeDeviceProfile(in: .from(avd: avd, mode: .edit(originalName: avd.name)))
     }
 
     func saveCurrentDraft() async {
-        guard let draft else {
+        guard var draftToSave = draft else {
             return
         }
+
+        let preferredNameSource = draftToSave.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? draftToSave.displayName
+            : draftToSave.name
+        let normalizedName = AVDEditorDraft.normalizedName(from: preferredNameSource)
+
+        guard !normalizedName.isEmpty else {
+            errorMessage = "Enter an AVD Name using letters, numbers, '.', '_' or '-'."
+            return
+        }
+
+        draftToSave.name = normalizedName
+        draft = draftToSave
 
         isBusy = true
         defer { isBusy = false }
 
         do {
-            try await service.saveDraft(draft, toolchain: toolchain)
+            try await service.saveDraft(draftToSave, toolchain: toolchain)
             await refresh()
-            selectedAVDName = draft.name
-            if let saved = avds.first(where: { $0.name == draft.name }) {
+            selectedAVDName = draftToSave.name
+            if let saved = avds.first(where: { $0.name == draftToSave.name }) {
                 self.draft = .from(avd: saved, mode: .edit(originalName: saved.name))
             }
         } catch {
@@ -477,5 +490,19 @@ final class AVDStore: ObservableObject {
             draft.systemImagePackage = installedSystemImages.first?.packagePath ?? ""
         }
         self.draft = draft
+    }
+
+    private func normalizeDeviceProfile(in draft: AVDEditorDraft) -> AVDEditorDraft {
+        guard !draft.deviceID.isEmpty else {
+            return draft
+        }
+
+        if draft.deviceID == AVDConstants.customDeviceID || deviceDefinitions.contains(where: { $0.id == draft.deviceID }) {
+            return draft
+        }
+
+        var normalizedDraft = draft
+        normalizedDraft.deviceID = AVDConstants.customDeviceID
+        return normalizedDraft
     }
 }
